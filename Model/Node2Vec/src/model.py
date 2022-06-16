@@ -28,20 +28,19 @@ class GCNConv_dgl(nn.Module):
 
 
 class MyGCN(nn.Module):
-    def __init__(self, nfeats, hidden_size):
+    def __init__(self, nfeats, hidden_size, features):
         super(MyGCN, self).__init__()
-        self.layers = nn.ModuleList()
+        self.embeddings = nn.Embedding(features.shape[0], features.shape[1])
+        self.embedding_dim = hidden_size
+        self.embeddings.weight.requires_grad_(False)
+        self.embeddings.weight = nn.Parameter(features)
+        self.linear = nn.Linear(nfeats, hidden_size)
 
-        self.layers.append(GCNConv_dgl(nfeats, hidden_size))
-
-    def forward(self, x, adj_t):
-        Adj = adj_t
-        # Adj.edata['w'] = F.dropout(Adj.edata['w'], p=self.dropout_adj_p, training=self.training)
-
-        x = self.layers[0](x, Adj)
-        x = F.relu(x)
-        return x
-
+    def forward(self, pos_rw, neg_rw):
+        # x = F.tanh(self.linear(x))
+        # x = F.relu(x)
+        return self.loss(pos_rw, neg_rw)
+    '''
     def loss(self, embedding, pos_rw, neg_rw):
         # Positive loss.
         embedding_dim = embedding.shape[1]
@@ -63,3 +62,38 @@ class MyGCN(nn.Module):
         neg_loss = -torch.log(1 - torch.sigmoid(out) + EPS).mean()
 
         return pos_loss + neg_loss
+    '''
+
+    def embedding(self, idx):
+        return self.linear(F.tanh(self.embeddings(idx)))
+
+
+    def loss(self, pos_rw, neg_rw):
+        r"""Computes the loss given positive and negative random walks."""
+
+        # Positive loss.
+        start, rest = pos_rw[:, 0], pos_rw[:, 1:].contiguous()
+
+        h_start = self.embedding(start).view(pos_rw.size(0), 1,
+                                             self.embedding_dim)
+        h_rest = self.embedding(rest.view(-1)).view(pos_rw.size(0), -1,
+                                                    self.embedding_dim)
+
+        out = (h_start * h_rest).sum(dim=-1).view(-1)
+        pos_loss = -torch.log(torch.sigmoid(out) + EPS).mean()
+
+        # Negative loss.
+        start, rest = neg_rw[:, 0], neg_rw[:, 1:].contiguous()
+
+        h_start = self.embedding(start).view(neg_rw.size(0), 1,
+                                             self.embedding_dim)
+        h_rest = self.embedding(rest.view(-1)).view(neg_rw.size(0), -1,
+                                                    self.embedding_dim)
+
+        out = (h_start * h_rest).sum(dim=-1).view(-1)
+        neg_loss = -torch.log(1 - torch.sigmoid(out) + EPS).mean()
+
+        return pos_loss + neg_loss
+
+    def output(self):
+        return self.linear(self.embeddings.weight)

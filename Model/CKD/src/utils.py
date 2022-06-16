@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import os
+import pickle
 import random
 import torch
 from multiprocessing import Pool
@@ -14,7 +15,7 @@ from sklearn.exceptions import UndefinedMetricWarning, ConvergenceWarning
 import math
 import heapq
 from datetime import datetime
-
+from construct_graph import get_ckd_graph
 
 def set_seed(seed, device):
     random.seed(seed)
@@ -24,11 +25,11 @@ def set_seed(seed, device):
         torch.cuda.manual_seed(seed)
 
 
-
 def PPR(node2neigh_list,alpha=0.15):
     sim_matrix_list=[]
     adjs=[]
     for node2neigh in node2neigh_list:
+        # [node->set()]
         adj=[]
         for node in range(len(node2neigh)):
             neighs=np.zeros(shape=len(node2neigh),dtype=np.int32)
@@ -42,7 +43,6 @@ def PPR(node2neigh_list,alpha=0.15):
         adjs.append(adj)
         sim_matrix_list.append(alpha*np.linalg.inv((I-(1-alpha)*(adj/np.sum(adj,axis=1).reshape(1,-1)))).astype(np.float32))
     return adjs,sim_matrix_list
-
 
 
 def find_topk(pairs,max_k):
@@ -75,9 +75,11 @@ def get_topk_neigh(adjs,node,topk,node2neigh_list):
         result.append(topk_nodes)
     return result
 
+
 def get_topk_neigh_single(data):
     adjs, node, topk, node2neigh_list=data
     return get_topk_neigh(adjs,node,topk,node2neigh_list)
+
 
 def get_topk_adj_transfer(new_adjs):
     result=[]
@@ -87,6 +89,7 @@ def get_topk_adj_transfer(new_adjs):
         channel_adj=channel_adj.reshape(1,channel_adj.shape[0],channel_adj.shape[1]).astype(np.float32)
         result.append(channel_adj)
     return result
+
 
 def get_topk_neigh_multi(target_nodes,node2neigh_list,topk,adjs,Ss):
 
@@ -109,6 +112,7 @@ def get_topk_neigh_multi(target_nodes,node2neigh_list,topk,adjs,Ss):
 
     adj_result=[]
     for new_adj in new_adjs:
+        # GCN处理后的adj
         adj_result.append(get_topk_adj_transfer(new_adj))
 
     final_result=[]
@@ -119,9 +123,56 @@ def get_topk_neigh_multi(target_nodes,node2neigh_list,topk,adjs,Ss):
             node2neigh=node2neigh_list[idy]
             status.append(0 if len(node2neigh[idx])<=1 else 1)
             temp.append([np.array(topk_result[idx][idy]),adj_result[idx][idy]])
+            # import pdb;pdb.set_trace()
         final_result.append([idx,status,temp])
     return final_result
 
+
+def get_my_topk(node2neigh_list):
+    '''
+    node2neigh_list: n_rel * dict(node->set)
+    '''
+    # ToDo 先构建完整的adj，再按照原始代码的adj按每个节点构建adj
+    adjs = []
+    node_num = len(node2neigh_list[0])
+    for node2neigh in node2neigh_list:
+        adj = []
+        for node in range(len(node2neigh)):
+            neighs = np.zeros(shape=len(node2neigh), dtype=np.int32)
+            neighs[node2neigh[node]] = 1
+            neighs[node] = 1
+            adj.append(neighs.reshape(1, -1))
+
+        # adjs.append()
+        adj = np.concatenate(adj, axis=0).astype(np.float32)
+        adjs.append(adj)
+
+    new_adjs = []
+    for idx in range(node_num):
+        temp = []
+        for rel in range(len(node2neigh_list)):
+            neighbor = list(node2neigh_list[rel][idx])
+            new_adj = adjs[rel][neighbor][:,neighbor]
+            temp.append(new_adj)
+        new_adjs.append(temp)
+
+    # ToDo 对每个节点的adj进行GCN处理
+
+    adj_result = []
+    for new_adj in new_adjs:
+        # GCN处理后的adj
+        adj_result.append(get_topk_adj_transfer(new_adj))
+
+    final_result = []
+    for idx in range(node_num):
+        temp = []
+        status = []
+        for idy in range(len(node2neigh_list)):
+            node2neigh = node2neigh_list[idy]
+            status.append(0 if len(node2neigh[idx]) <= 1 else 1)
+            temp.append([np.array(node2neigh[idx]), adj_result[idx][idy]])
+        final_result.append([idx, status, temp])
+    return final_result
 
 
 def load_node2new_id(path):
@@ -136,6 +187,7 @@ def load_node2new_id(path):
             data=[int(i) for i in line.strip().split('\t')]
             name2id[data[0]]=data[1]
     return name2id
+
 
 def load_sub_graph(path,name2id):
     """
@@ -153,6 +205,7 @@ def load_sub_graph(path,name2id):
             node2neigh[enode].add(snode)
     return node2neigh
 
+
 def load_node(path):
     """
     Load the old ID of the node and the characteristics of the node. If the node has no characteristics, 
@@ -165,18 +218,18 @@ def load_node(path):
             node2attr[int(data[0])]=np.array([float(i) for i in data[2].split(',')],dtype=np.float32)
     return node2attr
 
-def load_data(ltypes,base_path,use_features):
+
+def load_my_graph(path):
+    return
+
+
+def load_data(dataset, ltypes,base_path,use_features, use_new_graph=False):
 
     name2id=load_node2new_id(os.path.join(base_path,'node2id.txt'))
     id2name={v:k for k,v in name2id.items()}
     node2neigh_list=[]
     pos_edges=set()
     print(ltypes)
-    for ltype in ltypes:
-        graph=load_sub_graph(os.path.join(base_path,f'sub_graph_{ltype}.edgelist'),name2id)
-
-        node2neigh_list.append(graph)
-
     features = None
     if use_features:
         features=[]
@@ -187,6 +240,48 @@ def load_data(ltypes,base_path,use_features):
             features.append(feature)
         features=np.array(features,dtype=np.float32)
     node2neigh_pos={}
+
+    if use_new_graph:
+        # 以下到构图都为原始id
+        useful_node_types = {}
+        target_node_type = 0
+        with open(os.path.join(base_path, 'ltypes.dat')) as ltf:
+            for line in ltf:
+                line = line.strip().split('\t')
+                if len(line) == 1:
+                    target_node_type = int(line[0])
+                    continue
+                htype, ttype, rel = int(line[0]), int(line[1]), int(line[2])
+                useful_node_types[rel] = [htype, ttype]
+        type_nodes = {}
+        with open(os.path.join(base_path, 'node.dat')) as nf:
+            for line in nf:
+                line = line.strip().split('\t')
+                nid, tid = int(line[0]), int(line[1])
+                if tid not in type_nodes:
+                    type_nodes[tid] = []
+                type_nodes[tid].append(nid)
+        for ltype in ltypes:
+            try:
+                graph = load_sub_graph(os.path.join(base_path, f'my_sub_graph_{ltype}.edgelist'), name2id)
+                node2neigh_list.append(graph)
+            except:
+                htype, ttype = useful_node_types[ltype]
+                if htype != target_node_type:
+                    tmp = htype
+                    htype = ttype
+                    ttype = tmp
+                pretrained_path = f'/home/zhaohe/CKD/Data/{dataset}/transh.ckpt'
+                graph_path = os.path.join(base_path, f'my_sub_graph_{ltype}.edgelist')
+                graph = get_ckd_graph(type_nodes[htype], type_nodes[ttype], ltype, pretrained_path, graph_path, name2id, topk=20)
+                node2neigh_list.append(graph)
+        print("finish Load my subgraph!")
+    else:
+        for ltype in ltypes:
+            graph = load_sub_graph(os.path.join(base_path, f'sub_graph_{ltype}.edgelist'), name2id)
+
+            node2neigh_list.append(graph)
+
     for node2neigh in node2neigh_list:
         for k,v in node2neigh.items():
             if k not in node2neigh_pos:

@@ -413,7 +413,6 @@ def ckd_link_convert(dataset, attributed,version,use_target_node):
                 node2id[int(line[0])]=len(node2id)
                 target_node_set.add(int(line[0]))
     new_node_file.close()
-
     print(f'CKD Link: converting {dataset}\'s label file')
     new_label_file = open(f'{model_data_folder}/{label_file}', 'w')
     with open(f'{ori_data_folder}/{label_file}', 'r') as original_label_file:
@@ -442,10 +441,13 @@ def ckd_link_convert(dataset, attributed,version,use_target_node):
 
 
     #get homogeneous graph
+    useful_link_file = open(f'{model_data_folder}/ltypes.dat', 'w')
+    useful_link_file.write(f'{str(target_node)}\n')
     for ltype in ltypes:
         if int(ltype[0])==target_node or int(ltype[1])==target_node:
             useful_types.append(int(ltype[2]))
-
+            useful_link_file.write(f'{ltype[0]}\t{ltype[1]}\t{ltype[2]}\n')
+    useful_link_file.close()
     for ltype in useful_types:
         # if dataset=='DBLP2' and ltype==2:
         #     continue

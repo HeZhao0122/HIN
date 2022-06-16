@@ -64,10 +64,10 @@ def parse_args():
         args.ltype='0,2,4,6'
         args.lr=0.00001
         args.topk=20 #25
-        args.epochs=100
-        args.stop_cnt=100
-        args.global_weight=0.05
-        args.batch_size=6
+        args.epochs=1000
+        args.stop_cnt=50
+        args.global_weight=0.05 # org 0.05
+        args.batch_size=32
         args.seed = 7
     elif args.dataset=='DBLP2':
         args.dim=300
@@ -185,9 +185,6 @@ def global_score(criterion, emb_list, graph_emb_list, neg_graph_emb_list,status_
 
 def main():
     print(f'start time:{datetime.now()}')
-    cuda_device=1
-    torch.cuda.set_device(cuda_device)
-    print('cuda:',cuda_device)
 
     args = parse_args()
     print(f'emb size:{args.dim}')
@@ -199,25 +196,30 @@ def main():
     print(f'global weight:{args.global_weight}')
 
     base_path = f'../data/{args.dataset}/link/'
-    name2id,id2name,features,node2neigh_list,_=load_data(ltypes=[int(i) for i in args.ltype.strip().split(',')],base_path=base_path,use_features=True if args.attributed=='True' else False)
+    name2id,id2name,features,node2neigh_list,_=load_data(args.dataset, ltypes=[int(i) for i in args.ltype.strip().split(',')],
+                                                         base_path=base_path,use_features=True if args.attributed=='True' else False, use_new_graph=True)
    
     print(f'load data finish:{datetime.now()}')
     print('graph num:',len(node2neigh_list))
     print('node num:', len(name2id))
 
     target_nodes = np.array(list(id2name.keys()))
-    # import pdb;pdb.set_trace()
+
     if args.attributed!="True":
         features=np.random.randn(len(target_nodes), args.size).astype(np.float32)
     embeddings = torch.from_numpy(features).float().to(args.device)
     shuffle_embeddings=torch.from_numpy(shuffle(features)).to(args.device)
 
     dim = embeddings.shape[-1]
-
+    '''
     adjs,sim_matrix_list=PPR(node2neigh_list)
 
     print('load adj finish',datetime.now())
     total_train_views = get_topk_neigh_multi(target_nodes,node2neigh_list,args.topk,adjs,sim_matrix_list)
+    '''
+    total_train_views = get_my_topk(node2neigh_list)
+
+    # import pdb;pdb.set_trace()
     print(f'sample finish:{datetime.now()}')
     for node,status,view in total_train_views:
         for channel_data in view:

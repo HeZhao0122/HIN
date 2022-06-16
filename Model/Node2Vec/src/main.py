@@ -103,36 +103,30 @@ def parse_args():
 def main(args):
     data_dir = '../data'
     emb_file = 'emb.dat'
-    edge_index, g, features = load_data(args.dataset, data_dir)
+    edge_index, features = load_data(args.dataset, data_dir)
     path_gen = Node2Vec(edge_index, embedding_dim=100, walk_length=20,
-                     context_size=10, walks_per_node=10,
+                     context_size=10, walks_per_node=20,
                      num_negative_samples=1, p=1, q=1, sparse=True)
-    loader = path_gen.loader(batch_size=256, shuffle=True, num_workers=4)
-    model = MyGCN(nfeats=features.shape[1], hidden_size=100).cuda()
-    optimizer = torch.optim.SparseAdam(list(model.parameters()), lr=0.01)
+    loader = path_gen.loader(batch_size=32, shuffle=True, num_workers=4)
+    model = MyGCN(nfeats=features.shape[1], hidden_size=64, features=features).cuda()
+    optimizer = torch.optim.Adam(list(model.parameters()), lr=0.01)
 
     def train():
-        model.train()
-        total_loss = 0
-        optimizer.zero_grad()
-        cnt = 0
-        embeddings = model(features, g)
+        total_loss = 0.0
         for pos_rw, neg_rw in loader:
-            cnt += 1
-            loss = model.loss(embeddings, pos_rw.to(args.device), neg_rw.to(args.device))
-            total_loss += loss
-        total_loss /= cnt
-        total_loss.backward()
-        optimizer.step()
-        output(args, embeddings, f'{data_dir}/{args.dataset}/{emb_file}')
-        # import pdb;pdb.set_trace()
-        return total_loss.item()
+            optimizer.zero_grad()
+            loss = model(pos_rw.to(args.device), neg_rw.to(args.device))
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        return total_loss / len(loader)
 
 
-    for epoch in range(1, 151):
+    for epoch in range(1, 1501):
         loss = train()
         if epoch%10 == 0:
             print(f'Epoch: {epoch:02d}, Loss: {loss:.4f}')
+            output(args, model.output(), f'{data_dir}/{args.dataset}/{emb_file}')
 
 
 args = parse_args()

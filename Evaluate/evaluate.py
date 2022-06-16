@@ -62,7 +62,7 @@ def record(args, all_tasks, train_para, all_scores):
 def check(args):
     
     if args.attributed=='True':
-        if args.model not in ['R-GCN', 'HAN', 'MAGNN', 'HGT','CKD','HDGI','NSHE','GraphSNN_GCN', 'SLAPS-GNN']:
+        if args.model not in ['R-GCN', 'HAN', 'MAGNN', 'HGT','CKD','HDGI','NSHE','GraphSNN_GCN', 'SLAPS-GNN', 'Node2Vec']:
             print(f'{args.model} does not support attributed training!')
             print('Only R-GCN, HAN, MAGNN, and HGT support attributed training!')
             return False
